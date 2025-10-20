@@ -3,14 +3,15 @@ import pandas as pd
 import streamlit as st
 from ta.momentum import RSIIndicator, StochasticOscillator, StochRSIIndicator, ROCIndicator
 from ta.trend import MACD, ADXIndicator, CCIIndicator
-from ta.volume import BullBearPowerIndicator
 from ta.momentum import UltimateOscillator
 
 st.set_page_config(page_title="Intraday Signals", layout="wide")
 st.title("Intraday Buy/Sell/Neutral Signals")
 
 # --- Input ---
-stocks_input = st.text_input("Enter stock tickers (comma separated, NSE format e.g., TCS.NS, INFY.NS):")
+stocks_input = st.text_input(
+    "Enter stock tickers (comma separated, NSE format e.g., TCS.NS, INFY.NS):"
+)
 interval = st.selectbox("Select interval", ["5m", "15m", "30m", "1h"])
 period = st.selectbox("Select period", ["1d", "5d", "7d"])
 
@@ -34,8 +35,15 @@ if stocks_input:
         cci_val = CCIIndicator(df['High'], df['Low'], df['Close'], window=14).cci()
         ult_osc = UltimateOscillator(df['High'], df['Low'], df['Close'], window1=7, window2=14, window3=28).ultimate_oscillator()
         roc_val = ROCIndicator(df['Close'], window=12).roc()
-        bb_power = BullBearPowerIndicator(df['Close'], df['High'], df['Low'], window=13).bull_bear_power()
-        will_r = (df['Close'] - df['High'].rolling(14).max()) / (df['High'].rolling(14).max() - df['Low'].rolling(14).min()) * -100
+
+        # --- Bull/Bear Power manually ---
+        df['EMA13'] = df['Close'].ewm(span=13, adjust=False).mean()
+        df['Bull/Bear'] = df['High'] - df['EMA13']
+
+        # --- Williams %R ---
+        will_r = (df['Close'] - df['High'].rolling(14).max()) / (
+            df['High'].rolling(14).max() - df['Low'].rolling(14).min()
+        ) * -100
 
         # --- Last values ---
         last = {
@@ -49,7 +57,7 @@ if stocks_input:
             'CCI': cci_val.iloc[-1],
             'Ultimate Osc': ult_osc.iloc[-1],
             'ROC': roc_val.iloc[-1],
-            'Bull/Bear': bb_power.iloc[-1]
+            'Bull/Bear': df['Bull/Bear'].iloc[-1]
         }
 
         # --- Signal functions ---
@@ -77,8 +85,10 @@ if stocks_input:
 
         # --- Combined Signal ---
         scores = []
-        for col in ['RSI Signal','Stoch Signal','Stoch RSI Signal','MACD Signal','ADX Signal',
-                    'Williams %R Signal','CCI Signal','Ultimate Osc Signal','ROC Signal','Bull/Bear Signal']:
+        for col in [
+            'RSI Signal','Stoch Signal','Stoch RSI Signal','MACD Signal','ADX Signal',
+            'Williams %R Signal','CCI Signal','Ultimate Osc Signal','ROC Signal','Bull/Bear Signal'
+        ]:
             scores.append(1 if last[col]=="BUY" else -1 if last[col]=="SELL" else 0)
         total_score = sum(scores)
         last['Combined Signal'] = "BUY" if total_score>0 else "SELL" if total_score<0 else "NEUTRAL"
