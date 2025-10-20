@@ -121,27 +121,12 @@ if stocks_input:
 
         signals.append(last)
 
-    # --- Display Tables Separately ---
-if signals:
-    # Convert to DataFrame
+    # --- Display Table ---
     df_signals = pd.DataFrame(signals)
-    
-    # --- Indicator Values Table ---
-    indicator_cols = ['Stock', 'RSI', 'Stoch', 'Stoch RSI', 'MACD', 'ADX', 
-                      'Williams %R', 'CCI', 'Ultimate Osc', 'ROC', 'Bull/Bear']
-    st.subheader("Indicator Values Table")
-    # Convert all indicator columns to numeric, coerce errors to NaN
-for col in indicator_cols[1:]:
-    df_signals[col] = pd.to_numeric(df_signals[col], errors='coerce')
-
-st.dataframe(df_signals[indicator_cols].style.format("{:.2f}"))
-
-
-    # --- Signal Table ---
-    signal_cols = ['Stock', 'RSI Signal','Stoch Signal','Stoch RSI Signal','MACD Signal','ADX Signal',
-                   'Williams %R Signal','CCI Signal','Ultimate Osc Signal','ROC Signal',
-                   'Bull/Bear Signal','Combined Signal']
     st.subheader("Indicator Signals Table")
-    st.dataframe(df_signals[signal_cols].style.applymap(
-        highlight_signal, subset=signal_cols[1:]
+    st.dataframe(df_signals.style.applymap(
+        highlight_signal, 
+        subset=['RSI Signal','Stoch Signal','Stoch RSI Signal','MACD Signal','ADX Signal',
+                'Williams %R Signal','CCI Signal','Ultimate Osc Signal','ROC Signal',
+                'Bull/Bear Signal','Combined Signal']
     ))
