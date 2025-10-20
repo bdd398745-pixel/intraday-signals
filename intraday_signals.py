@@ -1,4 +1,4 @@
-# intraday_signals_app.py
+# intraday_signals_app_with_charts.py
 
 import streamlit as st
 import yfinance as yf
@@ -6,12 +6,13 @@ import pandas as pd
 import ta
 from datetime import datetime
 import time
+import plotly.graph_objects as go
 
 # ----------------------------
 # PAGE CONFIG
 # ----------------------------
 st.set_page_config(page_title="📊 Intraday Signal Dashboard", layout="wide")
-st.title("📊 Intraday Signal Dashboard")
+st.title("📊 Intraday Signal Dashboard with Charts")
 
 # ----------------------------
 # AUTO REFRESH SETUP
@@ -47,7 +48,7 @@ def get_data(symbol):
         if df.empty:
             return None
         df = df.reset_index()
-        df.columns = [col.replace(" ", "_") for col in df.columns]  # clean column names
+        df.columns = [col.replace(" ", "_") for col in df.columns]
         df["Close"] = df["Close"].astype(float)
         return df
     except Exception as e:
@@ -55,23 +56,16 @@ def get_data(symbol):
         return None
 
 def compute_indicators(df):
-    # Bollinger Bands
     bb_indicator = ta.volatility.BollingerBands(close=df["Close"], window=20, window_dev=2)
     df["bb_high"] = bb_indicator.bollinger_hband()
     df["bb_low"] = bb_indicator.bollinger_lband()
-
-    # RSI
     df["rsi"] = ta.momentum.RSIIndicator(close=df["Close"], window=14).rsi()
-
-    # Moving averages
     df["ma20"] = df["Close"].rolling(window=20).mean()
     df["ma50"] = df["Close"].rolling(window=50).mean()
-
     return df
 
 def get_signal(last_row):
     signals = []
-    # Simple strategy
     if last_row["Close"] > last_row["bb_high"]:
         signals.append("Sell (Price above BB high)")
     elif last_row["Close"] < last_row["bb_low"]:
@@ -86,8 +80,30 @@ def get_signal(last_row):
         signals.append("Trend Up")
     else:
         signals.append("Trend Down")
-
     return ", ".join(signals) if signals else "Hold"
+
+def plot_stock(df, symbol):
+    fig = go.Figure()
+    fig.add_trace(go.Candlestick(
+        x=df["Datetime"],
+        open=df["Open"], high=df["High"],
+        low=df["Low"], close=df["Close"],
+        name="Price"
+    ))
+    fig.add_trace(go.Scatter(x=df["Datetime"], y=df["bb_high"], line=dict(color='red', width=1), name="BB High"))
+    fig.add_trace(go.Scatter(x=df["Datetime"], y=df["bb_low"], line=dict(color='green', width=1), name="BB Low"))
+    fig.add_trace(go.Scatter(x=df["Datetime"], y=df["ma20"], line=dict(color='blue', width=1), name="MA20"))
+    fig.add_trace(go.Scatter(x=df["Datetime"], y=df["ma50"], line=dict(color='orange', width=1), name="MA50"))
+    fig.update_layout(title=f"{symbol} Price & Bollinger Bands", xaxis_title="Datetime", yaxis_title="Price")
+    st.plotly_chart(fig, use_container_width=True)
+
+    # RSI chart
+    fig_rsi = go.Figure()
+    fig_rsi.add_trace(go.Scatter(x=df["Datetime"], y=df["rsi"], line=dict(color='purple', width=2), name="RSI"))
+    fig_rsi.add_hline(y=70, line=dict(color='red', dash='dash'))
+    fig_rsi.add_hline(y=30, line=dict(color='green', dash='dash'))
+    fig_rsi.update_layout(title=f"{symbol} RSI", xaxis_title="Datetime", yaxis_title="RSI")
+    st.plotly_chart(fig_rsi, use_container_width=True)
 
 # ----------------------------
 # MAIN DASHBOARD
@@ -111,6 +127,9 @@ for symbol in symbols:
             "Signal": signal,
             "Time": last["Datetime"]
         })
+
+        # Plot charts for each stock
+        plot_stock(df, symbol)
 
 if all_data:
     result_df = pd.DataFrame(all_data)
