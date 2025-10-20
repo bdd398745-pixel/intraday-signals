@@ -2,9 +2,7 @@ import streamlit as st
 import yfinance as yf
 import ta
 from datetime import datetime
-import time
 import plotly.graph_objects as go
-from streamlit_autorefresh import st_autorefresh
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -13,9 +11,6 @@ warnings.filterwarnings("ignore")
 # PAGE CONFIG
 # ----------------------------
 st.set_page_config(page_title="Intraday Stock Signals", layout="wide")
-
-# Auto-refresh every 5 minutes
-st_autorefresh(interval=5 * 60 * 1000, key="data_refresh")
 
 st.title("📊 Intraday Stock Signal Dashboard")
 
