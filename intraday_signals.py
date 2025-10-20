@@ -1,9 +1,8 @@
 import yfinance as yf
 import pandas as pd
 import streamlit as st
-from ta.momentum import RSIIndicator, StochasticOscillator, StochRSIIndicator, ROCIndicator
+from ta.momentum import RSIIndicator, StochasticOscillator, StochRSIIndicator, ROCIndicator, UltimateOscillator
 from ta.trend import MACD, ADXIndicator, CCIIndicator
-from ta.momentum import UltimateOscillator
 
 st.set_page_config(page_title="Intraday Signals", layout="wide")
 st.title("Intraday Buy/Sell/Neutral Signals")
@@ -24,7 +23,20 @@ if stocks_input:
         if df.empty:
             st.warning(f"No data for {ticker}")
             continue
-        df = df.dropna()
+
+        # --- Ensure columns are 1D Series ---
+        close = df['Close']
+        high = df['High']
+        low = df['Low']
+
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
+        if isinstance(high, pd.DataFrame):
+            high = high.iloc[:, 0]
+        if isinstance(low, pd.DataFrame):
+            low = low.iloc[:, 0]
+
+        df = pd.DataFrame({'Close': close, 'High': high, 'Low': low})
 
         # --- Indicators ---
         rsi = RSIIndicator(df['Close'], window=14).rsi()
