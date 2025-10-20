@@ -3,7 +3,9 @@ import pandas as pd
 import streamlit as st
 from ta.momentum import RSIIndicator, StochasticOscillator, StochRSIIndicator, ROCIndicator, UltimateOscillator
 from ta.trend import MACD, ADXIndicator, CCIIndicator
+import plotly.graph_objects as go
 
+# --- Streamlit Page Config ---
 st.set_page_config(page_title="Intraday Signals", layout="wide")
 st.title("Intraday Buy/Sell/Neutral Signals")
 
@@ -14,12 +16,28 @@ stocks_input = st.text_input(
 interval = st.selectbox("Select interval", ["5m", "15m", "30m", "1h"])
 period = st.selectbox("Select period", ["1d", "5d", "7d"])
 
+# --- Caching data fetching ---
+@st.cache_data
+def fetch_data(ticker, interval, period):
+    df = yf.download(ticker, interval=interval, period=period)
+    return df
+
+# --- Highlighting function ---
+def highlight_signal(val):
+    if val == "BUY":
+        color = "green"
+    elif val == "SELL":
+        color = "red"
+    else:
+        color = "yellow"
+    return f'background-color: {color}'
+
 if stocks_input:
     tickers = [s.strip() for s in stocks_input.split(",")]
     signals = []
 
     for ticker in tickers:
-        df = yf.download(ticker, interval=interval, period=period)
+        df = fetch_data(ticker, interval, period)
         if df.empty:
             st.warning(f"No data for {ticker}")
             continue
@@ -28,14 +46,9 @@ if stocks_input:
         close = df['Close']
         high = df['High']
         low = df['Low']
-
-        if isinstance(close, pd.DataFrame):
-            close = close.iloc[:, 0]
-        if isinstance(high, pd.DataFrame):
-            high = high.iloc[:, 0]
-        if isinstance(low, pd.DataFrame):
-            low = low.iloc[:, 0]
-
+        if isinstance(close, pd.DataFrame): close = close.iloc[:, 0]
+        if isinstance(high, pd.DataFrame): high = high.iloc[:, 0]
+        if isinstance(low, pd.DataFrame): low = low.iloc[:, 0]
         df = pd.DataFrame({'Close': close, 'High': high, 'Low': low})
 
         # --- Indicators ---
@@ -57,7 +70,7 @@ if stocks_input:
             df['High'].rolling(14).max() - df['Low'].rolling(14).min()
         ) * -100
 
-        # --- Last values ---
+        # --- Last values dictionary ---
         last = {
             'Stock': ticker,
             'RSI': rsi.iloc[-1],
@@ -107,6 +120,23 @@ if stocks_input:
 
         signals.append(last)
 
+        # --- Optional Plotly Chart ---
+        st.subheader(f"{ticker} Price Chart + RSI + MACD")
+        df_plot = df.copy()
+        df_plot['RSI'] = rsi
+        df_plot['MACD'] = MACD(df['Close']).macd()
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['Close'], name='Close'))
+        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['RSI'], name='RSI'))
+        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['MACD'], name='MACD'))
+        st.plotly_chart(fig, use_container_width=True)
+
     # --- Display Table ---
     df_signals = pd.DataFrame(signals)
-    st.dataframe(df_signals)
+    st.subheader("Indicator Signals Table")
+    st.dataframe(df_signals.style.applymap(
+        highlight_signal, 
+        subset=['RSI Signal','Stoch Signal','Stoch RSI Signal','MACD Signal','ADX Signal',
+                'Williams %R Signal','CCI Signal','Ultimate Osc Signal','ROC Signal',
+                'Bull/Bear Signal','Combined Signal']
+    ))
