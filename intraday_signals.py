@@ -1,157 +1,149 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from ta.momentum import (
-    RSIIndicator,
-    StochasticOscillator,
-    StochRSIIndicator,
-    ROCIndicator,
-    WilliamsRIndicator,
-)
-from ta.trend import MACD, CCIIndicator, ADXIndicator
-from ta.volume import VolumeWeightedAveragePrice
-from ta.others import UltimateOscillator
-from streamlit_autorefresh import st_autorefresh
+import ta
+import time
 
 # --------------------------------------------
-# PAGE CONFIG
+# STREAMLIT PAGE SETUP
 # --------------------------------------------
-st.set_page_config(page_title="Intraday Indicator Signals", layout="wide")
-st.title("📊 Intraday Technical Signal Dashboard (Free Live Refresh)")
-st.caption("⏱ Live data (delayed 5–10 mins) from Yahoo Finance • Auto-refresh enabled")
+st.set_page_config(page_title="📊 Intraday Indicator Signals", layout="wide")
+st.title("📊 Intraday Technical Signal Dashboard (Live Auto Refresh)")
+st.caption("Data updates every few minutes from Yahoo Finance (5–10 min delay).")
 
 # --------------------------------------------
-# USER INPUTS
+# INPUT SECTION
 # --------------------------------------------
-col1, col2 = st.columns(2)
-ticker = col1.text_input("Enter NSE Stock Symbol", "RELIANCE.NS")
-refresh_rate = col2.slider("Auto-refresh interval (minutes)", 1, 10, 3)
-
-# Auto refresh setup
-st_autorefresh(interval=refresh_rate * 60 * 1000, limit=None, key="data_refresh")
+symbol = st.text_input("Enter Stock Symbol (e.g., RELIANCE.NS)", "RELIANCE.NS")
+interval = st.selectbox("Select Interval", ["1m", "5m", "15m", "30m", "1h", "1d"])
+refresh_rate = st.slider("Auto Refresh (seconds)", 30, 300, 120)
 
 # --------------------------------------------
-# FETCH DATA
+# FETCH LIVE DATA
 # --------------------------------------------
-@st.cache_data(ttl=300)
-def load_data(symbol):
-    df = yf.download(symbol, period="5d", interval="5m")
-    df = df.dropna()
-    return df
+@st.cache_data(ttl=refresh_rate)
+def get_data(symbol, interval):
+    data = yf.download(tickers=symbol, period="5d", interval=interval)
+    data.dropna(inplace=True)
+    return data
 
 try:
-    df = load_data(ticker)
+    df = get_data(symbol, interval)
 except Exception as e:
-    st.error(f"Failed to fetch data: {e}")
+    st.error(f"Error fetching data: {e}")
     st.stop()
-
-st.write(f"Last updated: {df.index[-1]}")
 
 # --------------------------------------------
 # INDICATOR CALCULATIONS
 # --------------------------------------------
-df["RSI"] = RSIIndicator(df["Close"], window=14).rsi()
-df["%K"] = StochasticOscillator(df["High"], df["Low"], df["Close"], window=14).stoch()
-df["StochRSI"] = StochRSIIndicator(df["Close"], window=14).stochrsi()
-df["MACD"] = MACD(df["Close"], window_slow=26, window_fast=12, window_sign=9).macd_diff()
-adx = ADXIndicator(df["High"], df["Low"], df["Close"], window=14)
+df["RSI"] = ta.momentum.RSIIndicator(df["Close"]).rsi()
+stoch = ta.momentum.StochasticOscillator(df["High"], df["Low"], df["Close"])
+df["Stochastic"] = stoch.stoch()
+df["Stochastic_RSI"] = ta.momentum.StochRSIIndicator(df["Close"]).stochrsi()
+macd = ta.trend.MACD(df["Close"])
+df["MACD"] = macd.macd()
+df["MACD_signal"] = macd.macd_signal()
+adx = ta.trend.ADXIndicator(df["High"], df["Low"], df["Close"])
 df["ADX"] = adx.adx()
 df["DI+"] = adx.adx_pos()
 df["DI-"] = adx.adx_neg()
-df["Williams %R"] = WilliamsRIndicator(df["High"], df["Low"], df["Close"], lbp=14).williams_r()
-df["CCI"] = CCIIndicator(df["High"], df["Low"], df["Close"], window=14).cci()
-df["Ultimate Oscillator"] = UltimateOscillator(df["High"], df["Low"], df["Close"]).ultimate_oscillator()
-df["ROC"] = ROCIndicator(df["Close"], window=12).roc()
-df["Bull/Bear Power"] = df["Close"] - df["Close"].ewm(span=13).mean()
+df["Williams %R"] = ta.momentum.WilliamsRIndicator(df["High"], df["Low"], df["Close"]).williams_r()
+df["CCI"] = ta.trend.CCIIndicator(df["High"], df["Low"], df["Close"]).cci()
+df["ROC"] = ta.momentum.ROCIndicator(df["Close"]).roc()
+df["BullBearPower"] = df["High"] - ta.trend.EMAIndicator(df["Close"], 13).ema_indicator()
+
+# Manual Ultimate Oscillator
+df["BP"] = df["Close"] - df["Low"]
+df["TR"] = df[["High", "Close"]].max(axis=1) - df[["Low", "Close"]].min(axis=1)
+avg7 = df["BP"].rolling(7).sum() / df["TR"].rolling(7).sum()
+avg14 = df["BP"].rolling(14).sum() / df["TR"].rolling(14).sum()
+avg28 = df["BP"].rolling(28).sum() / df["TR"].rolling(28).sum()
+df["UltimateOscillator"] = 100 * ((4 * avg7) + (2 * avg14) + avg28) / (4 + 2 + 1)
 
 # --------------------------------------------
-# SIGNAL LOGIC
+# SIGNAL GENERATION
 # --------------------------------------------
 latest = df.iloc[-1]
+signals = {}
 
-def get_signal(name, val):
-    if name == "RSI":
-        if val < 30: return "BUY"
-        elif val > 70: return "SELL"
-        else: return "NEUTRAL"
+# RSI
+if latest["RSI"] < 30:
+    signals["RSI"] = "BUY"
+elif latest["RSI"] > 70:
+    signals["RSI"] = "SELL"
+else:
+    signals["RSI"] = "NEUTRAL"
 
-    elif name == "%K":
-        if val < 20: return "BUY"
-        elif val > 80: return "SELL"
-        else: return "NEUTRAL"
+# Stochastic
+if latest["Stochastic"] < 20:
+    signals["Stochastic"] = "BUY"
+elif latest["Stochastic"] > 80:
+    signals["Stochastic"] = "SELL"
+else:
+    signals["Stochastic"] = "NEUTRAL"
 
-    elif name == "StochRSI":
-        if val < 0.2: return "BUY"
-        elif val > 0.8: return "SELL"
-        else: return "NEUTRAL"
+# Stoch RSI
+if latest["Stochastic_RSI"] < 0.2:
+    signals["Stochastic RSI"] = "BUY"
+elif latest["Stochastic_RSI"] > 0.8:
+    signals["Stochastic RSI"] = "SELL"
+else:
+    signals["Stochastic RSI"] = "NEUTRAL"
 
-    elif name == "MACD":
-        if val > 0: return "BUY"
-        elif val < 0: return "SELL"
-        else: return "NEUTRAL"
+# MACD
+if latest["MACD"] > latest["MACD_signal"]:
+    signals["MACD"] = "BUY"
+elif latest["MACD"] < latest["MACD_signal"]:
+    signals["MACD"] = "SELL"
+else:
+    signals["MACD"] = "NEUTRAL"
 
-    elif name == "ADX":
-        if latest["ADX"] > 25:
-            if latest["DI+"] > latest["DI-"]: return "BUY"
-            elif latest["DI+"] < latest["DI-"]: return "SELL"
-        return "NEUTRAL"
+# ADX
+if latest["ADX"] > 25 and latest["DI+"] > latest["DI-"]:
+    signals["ADX"] = "BUY"
+elif latest["ADX"] > 25 and latest["DI-"] > latest["DI+"]:
+    signals["ADX"] = "SELL"
+else:
+    signals["ADX"] = "NEUTRAL"
 
-    elif name == "Williams %R":
-        if val < -80: return "BUY"
-        elif val > -20: return "SELL"
-        else: return "NEUTRAL"
+# Williams %R
+if latest["Williams %R"] < -80:
+    signals["Williams %R"] = "BUY"
+elif latest["Williams %R"] > -20:
+    signals["Williams %R"] = "SELL"
+else:
+    signals["Williams %R"] = "NEUTRAL"
 
-    elif name == "CCI":
-        if val < -100: return "BUY"
-        elif val > 100: return "SELL"
-        else: return "NEUTRAL"
+# CCI
+if latest["CCI"] < -100:
+    signals["CCI"] = "BUY"
+elif latest["CCI"] > 100:
+    signals["CCI"] = "SELL"
+else:
+    signals["CCI"] = "NEUTRAL"
 
-    elif name == "Ultimate Oscillator":
-        if val < 30: return "BUY"
-        elif val > 70: return "SELL"
-        else: return "NEUTRAL"
+# Ultimate Oscillator
+if latest["UltimateOscillator"] < 30:
+    signals["Ultimate Oscillator"] = "BUY"
+elif latest["UltimateOscillator"] > 70:
+    signals["Ultimate Oscillator"] = "SELL"
+else:
+    signals["Ultimate Oscillator"] = "NEUTRAL"
 
-    elif name == "ROC":
-        if val > 0: return "BUY"
-        elif val < 0: return "SELL"
-        else: return "NEUTRAL"
+# ROC
+signals["ROC"] = "BUY" if latest["ROC"] > 0 else ("SELL" if latest["ROC"] < 0 else "NEUTRAL")
 
-    elif name == "Bull/Bear Power":
-        if val > 0: return "BUY"
-        elif val < 0: return "SELL"
-        else: return "NEUTRAL"
+# Bull/Bear Power
+signals["Bull/Bear Power"] = "BUY" if latest["BullBearPower"] > 0 else ("SELL" if latest["BullBearPower"] < 0 else "NEUTRAL")
 
 # --------------------------------------------
-# BUILD SIGNAL TABLE
+# DISPLAY RESULTS
 # --------------------------------------------
-signals = {
-    "RSI (14)": [round(latest["RSI"], 2), get_signal("RSI", latest["RSI"])],
-    "Stochastic (9,6)": [round(latest["%K"], 2), get_signal("%K", latest["%K"])],
-    "Stochastic RSI (14)": [round(latest["StochRSI"], 2), get_signal("StochRSI", latest["StochRSI"])],
-    "MACD (12,26)": [round(latest["MACD"], 2), get_signal("MACD", latest["MACD"])],
-    "ADX (14)": [round(latest["ADX"], 2), get_signal("ADX", latest["ADX"])],
-    "Williams %R": [round(latest["Williams %R"], 2), get_signal("Williams %R", latest["Williams %R"])],
-    "CCI (14)": [round(latest["CCI"], 2), get_signal("CCI", latest["CCI"])],
-    "Ultimate Oscillator": [round(latest["Ultimate Oscillator"], 2), get_signal("Ultimate Oscillator", latest["Ultimate Oscillator"])],
-    "ROC": [round(latest["ROC"], 2), get_signal("ROC", latest["ROC"])],
-    "Bull/Bear Power (13)": [round(latest["Bull/Bear Power"], 2), get_signal("Bull/Bear Power", latest["Bull/Bear Power"])],
-}
-
-signals_df = pd.DataFrame(signals, index=["Value", "Signal"]).T
-st.dataframe(signals_df.style.highlight_max(axis=0, color="lightgreen").highlight_min(axis=0, color="#FFB6B6"))
+signal_df = pd.DataFrame(signals.items(), columns=["Indicator", "Signal"])
+st.dataframe(signal_df, use_container_width=True)
 
 # --------------------------------------------
-# SUMMARY
+# AUTO REFRESH
 # --------------------------------------------
-buy = sum(1 for s in signals_df["Signal"] if s == "BUY")
-sell = sum(1 for s in signals_df["Signal"] if s == "SELL")
-neutral = sum(1 for s in signals_df["Signal"] if s == "NEUTRAL")
-
-st.subheader("📈 Overall Summary")
-col1, col2, col3 = st.columns(3)
-col1.metric("BUY", buy)
-col2.metric("SELL", sell)
-col3.metric("NEUTRAL", neutral)
-
-st.markdown("---")
-st.caption("⚠️ This dashboard uses delayed Yahoo Finance data and is for educational use only.")
+time.sleep(refresh_rate)
+st.experimental_rerun()
