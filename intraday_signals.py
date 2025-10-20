@@ -4,11 +4,11 @@ import streamlit as st
 from ta.momentum import RSIIndicator, StochasticOscillator, StochRSIIndicator, ROCIndicator, UltimateOscillator
 from ta.trend import MACD, ADXIndicator, CCIIndicator
 
-# --- Streamlit Page Config ---
+# --- Streamlit Config ---
 st.set_page_config(page_title="Intraday Signals", layout="wide")
 st.title("Intraday Buy/Sell/Neutral Signals")
 
-# --- Input ---
+# --- Inputs ---
 stocks_input = st.text_input(
     "Enter stock tickers (comma separated, NSE format e.g., TCS.NS, INFY.NS):"
 )
@@ -17,13 +17,13 @@ period_options = {"1m": ["1d", "5d"], "5m": ["1d", "5d", "7d"], "15m": ["1d", "5
                   "30m": ["1d", "5d", "7d"], "1h": ["1d", "5d", "7d"]}
 period = st.selectbox("Select period", period_options[interval])
 
-# --- Caching data fetching ---
+# --- Cache Data ---
 @st.cache_data
 def fetch_data(ticker, interval, period):
-    df = yf.download(ticker, interval=interval, period=period)
+    df = yf.download(ticker, interval=interval, period=period, progress=False)
     return df
 
-# --- Highlighting function ---
+# --- Highlight Function ---
 def highlight_signal(val):
     if val == "BUY":
         color = "green"
@@ -35,7 +35,8 @@ def highlight_signal(val):
 
 if stocks_input:
     tickers = [s.strip() for s in stocks_input.split(",")]
-    signals = []
+    values_data = []
+    signals_data = []
 
     for ticker in tickers:
         df = fetch_data(ticker, interval, period)
@@ -43,7 +44,6 @@ if stocks_input:
             st.warning(f"No data for {ticker}")
             continue
 
-        # --- Ensure columns are 1D Series ---
         close = df['Close']
         high = df['High']
         low = df['Low']
@@ -62,7 +62,7 @@ if stocks_input:
         ult_osc = UltimateOscillator(df['High'], df['Low'], df['Close'], window1=7, window2=14, window3=28).ultimate_oscillator()
         roc_val = ROCIndicator(df['Close'], window=12).roc()
 
-        # --- Bull/Bear Power manually ---
+        # --- Bull/Bear Power ---
         df['EMA13'] = df['Close'].ewm(span=13, adjust=False).mean()
         df['Bull/Bear'] = df['High'] - df['EMA13']
 
@@ -71,9 +71,10 @@ if stocks_input:
             df['High'].rolling(14).max() - df['Low'].rolling(14).min()
         ) * -100
 
-        # --- Last values dictionary ---
+        # --- Last Values ---
         last = {
             'Stock': ticker,
+            'LTP': df['Close'].iloc[-1],
             'RSI': rsi.iloc[-1],
             'Stoch': stoch.iloc[-1],
             'Stoch RSI': stoch_rsi.iloc[-1],
@@ -86,7 +87,7 @@ if stocks_input:
             'Bull/Bear': df['Bull/Bear'].iloc[-1]
         }
 
-        # --- Signal functions ---
+        # --- Signal Functions ---
         def signal_rsi(x): return "BUY" if x < 30 else "SELL" if x > 70 else "NEUTRAL"
         def signal_stoch(x): return "BUY" if x < 20 else "SELL" if x > 80 else "NEUTRAL"
         def signal_stochrsi(x): return "BUY" if x < 0.2 else "SELL" if x > 0.8 else "NEUTRAL"
@@ -98,16 +99,21 @@ if stocks_input:
         def signal_roc(x): return "BUY" if x > 0 else "SELL" if x < 0 else "NEUTRAL"
         def signal_bb(x): return "BUY" if x > 0 else "SELL" if x < 0 else "NEUTRAL"
 
-        last['RSI Signal'] = signal_rsi(last['RSI'])
-        last['Stoch Signal'] = signal_stoch(last['Stoch'])
-        last['Stoch RSI Signal'] = signal_stochrsi(last['Stoch RSI'])
-        last['MACD Signal'] = signal_macd(last['MACD'])
-        last['ADX Signal'] = signal_adx(last['ADX'])
-        last['Williams %R Signal'] = signal_willr(last['Williams %R'])
-        last['CCI Signal'] = signal_cci(last['CCI'])
-        last['Ultimate Osc Signal'] = signal_ultosc(last['Ultimate Osc'])
-        last['ROC Signal'] = signal_roc(last['ROC'])
-        last['Bull/Bear Signal'] = signal_bb(last['Bull/Bear'])
+        # --- Signals ---
+        signals = {
+            'Stock': ticker,
+            'LTP': df['Close'].iloc[-1],
+            'RSI Signal': signal_rsi(last['RSI']),
+            'Stoch Signal': signal_stoch(last['Stoch']),
+            'Stoch RSI Signal': signal_stochrsi(last['Stoch RSI']),
+            'MACD Signal': signal_macd(last['MACD']),
+            'ADX Signal': signal_adx(last['ADX']),
+            'Williams %R Signal': signal_willr(last['Williams %R']),
+            'CCI Signal': signal_cci(last['CCI']),
+            'Ultimate Osc Signal': signal_ultosc(last['Ultimate Osc']),
+            'ROC Signal': signal_roc(last['ROC']),
+            'Bull/Bear Signal': signal_bb(last['Bull/Bear'])
+        }
 
         # --- Combined Signal ---
         scores = []
@@ -115,17 +121,24 @@ if stocks_input:
             'RSI Signal','Stoch Signal','Stoch RSI Signal','MACD Signal','ADX Signal',
             'Williams %R Signal','CCI Signal','Ultimate Osc Signal','ROC Signal','Bull/Bear Signal'
         ]:
-            scores.append(1 if last[col]=="BUY" else -1 if last[col]=="SELL" else 0)
+            scores.append(1 if signals[col] == "BUY" else -1 if signals[col] == "SELL" else 0)
         total_score = sum(scores)
-        last['Combined Signal'] = "BUY" if total_score>0 else "SELL" if total_score<0 else "NEUTRAL"
+        signals['Combined Signal'] = "BUY" if total_score > 0 else "SELL" if total_score < 0 else "NEUTRAL"
 
-        signals.append(last)
+        # --- Append to Lists ---
+        values_data.append(last)
+        signals_data.append(signals)
 
-    # --- Display Table ---
-    df_signals = pd.DataFrame(signals)
-    st.subheader("Indicator Signals Table")
+    # --- Display Values Table ---
+    st.subheader("📊 Indicator Values Table")
+    df_values = pd.DataFrame(values_data)
+    st.dataframe(df_values)
+
+    # --- Display Signals Table ---
+    st.subheader("📈 Indicator Signals Table")
+    df_signals = pd.DataFrame(signals_data)
     st.dataframe(df_signals.style.applymap(
-        highlight_signal, 
+        highlight_signal,
         subset=['RSI Signal','Stoch Signal','Stoch RSI Signal','MACD Signal','ADX Signal',
                 'Williams %R Signal','CCI Signal','Ultimate Osc Signal','ROC Signal',
                 'Bull/Bear Signal','Combined Signal']
