@@ -1,149 +1,97 @@
 import streamlit as st
-import pandas as pd
 import yfinance as yf
+import pandas as pd
 import ta
 import time
 
 # --------------------------------------------
-# STREAMLIT PAGE SETUP
+# PAGE SETUP
 # --------------------------------------------
-st.set_page_config(page_title="📊 Intraday Indicator Signals", layout="wide")
-st.title("📊 Intraday Technical Signal Dashboard (Live Auto Refresh)")
-st.caption("Data updates every few minutes from Yahoo Finance (5–10 min delay).")
-
-# --------------------------------------------
-# INPUT SECTION
-# --------------------------------------------
-symbol = st.text_input("Enter Stock Symbol (e.g., RELIANCE.NS)", "RELIANCE.NS")
-interval = st.selectbox("Select Interval", ["1m", "5m", "15m", "30m", "1h", "1d"])
-refresh_rate = st.slider("Auto Refresh (seconds)", 30, 300, 120)
+st.set_page_config(page_title="📊 Intraday Signal Dashboard", layout="wide")
+st.title("📊 Intraday Technical Signal Dashboard (Live Refresh)")
+st.caption("Auto-refreshes every few minutes using free Yahoo Finance data")
 
 # --------------------------------------------
-# FETCH LIVE DATA
+# USER INPUTS
 # --------------------------------------------
-@st.cache_data(ttl=refresh_rate)
-def get_data(symbol, interval):
-    data = yf.download(tickers=symbol, period="5d", interval=interval)
-    data.dropna(inplace=True)
-    return data
-
-try:
-    df = get_data(symbol, interval)
-except Exception as e:
-    st.error(f"Error fetching data: {e}")
-    st.stop()
+default_symbols = ["RELIANCE.NS", "HDFCBANK.NS", "INFY.NS", "TCS.NS", "ICICIBANK.NS"]
+symbols = st.multiselect("Select stocks:", default_symbols, default=default_symbols)
+interval = st.selectbox("Interval", ["1m", "5m", "15m", "30m", "1h", "1d"], index=2)
+refresh_rate = st.slider("Refresh (seconds)", 30, 300, 120)
 
 # --------------------------------------------
-# INDICATOR CALCULATIONS
+# FETCH DATA
 # --------------------------------------------
-df["RSI"] = ta.momentum.RSIIndicator(df["Close"]).rsi()
-stoch = ta.momentum.StochasticOscillator(df["High"], df["Low"], df["Close"])
-df["Stochastic"] = stoch.stoch()
-df["Stochastic_RSI"] = ta.momentum.StochRSIIndicator(df["Close"]).stochrsi()
-macd = ta.trend.MACD(df["Close"])
-df["MACD"] = macd.macd()
-df["MACD_signal"] = macd.macd_signal()
-adx = ta.trend.ADXIndicator(df["High"], df["Low"], df["Close"])
-df["ADX"] = adx.adx()
-df["DI+"] = adx.adx_pos()
-df["DI-"] = adx.adx_neg()
-df["Williams %R"] = ta.momentum.WilliamsRIndicator(df["High"], df["Low"], df["Close"]).williams_r()
-df["CCI"] = ta.trend.CCIIndicator(df["High"], df["Low"], df["Close"]).cci()
-df["ROC"] = ta.momentum.ROCIndicator(df["Close"]).roc()
-df["BullBearPower"] = df["High"] - ta.trend.EMAIndicator(df["Close"], 13).ema_indicator()
-
-# Manual Ultimate Oscillator
-df["BP"] = df["Close"] - df["Low"]
-df["TR"] = df[["High", "Close"]].max(axis=1) - df[["Low", "Close"]].min(axis=1)
-avg7 = df["BP"].rolling(7).sum() / df["TR"].rolling(7).sum()
-avg14 = df["BP"].rolling(14).sum() / df["TR"].rolling(14).sum()
-avg28 = df["BP"].rolling(28).sum() / df["TR"].rolling(28).sum()
-df["UltimateOscillator"] = 100 * ((4 * avg7) + (2 * avg14) + avg28) / (4 + 2 + 1)
+def get_data(symbol):
+    df = yf.download(symbol, period="5d", interval=interval)
+    df = df.reset_index()
+    df.columns = [col.replace(" ", "_") for col in df.columns]
+    df["Close"] = df["Close"].astype(float).squeeze()  # ensure 1D
+    return df
 
 # --------------------------------------------
-# SIGNAL GENERATION
+# INDICATOR CALCULATION
 # --------------------------------------------
-latest = df.iloc[-1]
-signals = {}
-
-# RSI
-if latest["RSI"] < 30:
-    signals["RSI"] = "BUY"
-elif latest["RSI"] > 70:
-    signals["RSI"] = "SELL"
-else:
-    signals["RSI"] = "NEUTRAL"
-
-# Stochastic
-if latest["Stochastic"] < 20:
-    signals["Stochastic"] = "BUY"
-elif latest["Stochastic"] > 80:
-    signals["Stochastic"] = "SELL"
-else:
-    signals["Stochastic"] = "NEUTRAL"
-
-# Stoch RSI
-if latest["Stochastic_RSI"] < 0.2:
-    signals["Stochastic RSI"] = "BUY"
-elif latest["Stochastic_RSI"] > 0.8:
-    signals["Stochastic RSI"] = "SELL"
-else:
-    signals["Stochastic RSI"] = "NEUTRAL"
-
-# MACD
-if latest["MACD"] > latest["MACD_signal"]:
-    signals["MACD"] = "BUY"
-elif latest["MACD"] < latest["MACD_signal"]:
-    signals["MACD"] = "SELL"
-else:
-    signals["MACD"] = "NEUTRAL"
-
-# ADX
-if latest["ADX"] > 25 and latest["DI+"] > latest["DI-"]:
-    signals["ADX"] = "BUY"
-elif latest["ADX"] > 25 and latest["DI-"] > latest["DI+"]:
-    signals["ADX"] = "SELL"
-else:
-    signals["ADX"] = "NEUTRAL"
-
-# Williams %R
-if latest["Williams %R"] < -80:
-    signals["Williams %R"] = "BUY"
-elif latest["Williams %R"] > -20:
-    signals["Williams %R"] = "SELL"
-else:
-    signals["Williams %R"] = "NEUTRAL"
-
-# CCI
-if latest["CCI"] < -100:
-    signals["CCI"] = "BUY"
-elif latest["CCI"] > 100:
-    signals["CCI"] = "SELL"
-else:
-    signals["CCI"] = "NEUTRAL"
-
-# Ultimate Oscillator
-if latest["UltimateOscillator"] < 30:
-    signals["Ultimate Oscillator"] = "BUY"
-elif latest["UltimateOscillator"] > 70:
-    signals["Ultimate Oscillator"] = "SELL"
-else:
-    signals["Ultimate Oscillator"] = "NEUTRAL"
-
-# ROC
-signals["ROC"] = "BUY" if latest["ROC"] > 0 else ("SELL" if latest["ROC"] < 0 else "NEUTRAL")
-
-# Bull/Bear Power
-signals["Bull/Bear Power"] = "BUY" if latest["BullBearPower"] > 0 else ("SELL" if latest["BullBearPower"] < 0 else "NEUTRAL")
+def compute_indicators(df):
+    df["RSI"] = ta.momentum.RSIIndicator(df["Close"]).rsi()
+    stoch = ta.momentum.StochasticOscillator(df["High"], df["Low"], df["Close"])
+    df["Stochastic"] = stoch.stoch()
+    df["MACD"] = ta.trend.MACD(df["Close"]).macd()
+    df["EMA_20"] = ta.trend.EMAIndicator(df["Close"], window=20).ema_indicator()
+    df["EMA_50"] = ta.trend.EMAIndicator(df["Close"], window=50).ema_indicator()
+    df["BB_High"] = ta.volatility.BollingerBands(df["Close"]).bollinger_hband()
+    df["BB_Low"] = ta.volatility.BollingerBands(df["Close"]).bollinger_lband()
+    return df
 
 # --------------------------------------------
-# DISPLAY RESULTS
+# SIGNAL LOGIC
 # --------------------------------------------
-signal_df = pd.DataFrame(signals.items(), columns=["Indicator", "Signal"])
-st.dataframe(signal_df, use_container_width=True)
+def get_signal(row):
+    signals = []
+    if row["RSI"] < 30:
+        signals.append("RSI Oversold")
+    elif row["RSI"] > 70:
+        signals.append("RSI Overbought")
+    if row["Close"] > row["EMA_20"] and row["EMA_20"] > row["EMA_50"]:
+        signals.append("Bullish EMA Cross")
+    elif row["Close"] < row["EMA_20"] and row["EMA_20"] < row["EMA_50"]:
+        signals.append("Bearish EMA Cross")
+    if row["Close"] < row["BB_Low"]:
+        signals.append("Bollinger Buy")
+    elif row["Close"] > row["BB_High"]:
+        signals.append("Bollinger Sell")
+
+    if len(signals) == 0:
+        return "Neutral"
+    elif "Buy" in " ".join(signals) or "Oversold" in " ".join(signals) or "Bullish" in " ".join(signals):
+        return "BUY"
+    elif "Sell" in " ".join(signals) or "Overbought" in " ".join(signals) or "Bearish" in " ".join(signals):
+        return "SELL"
+    else:
+        return "Neutral"
 
 # --------------------------------------------
-# AUTO REFRESH
+# MAIN LOGIC
 # --------------------------------------------
-time.sleep(refresh_rate)
-st.experimental_rerun()
+placeholder = st.empty()
+
+while True:
+    all_data = []
+    for symbol in symbols:
+        df = get_data(symbol)
+        df = compute_indicators(df)
+        last = df.iloc[-1]
+        signal = get_signal(last)
+        all_data.append({
+            "Symbol": symbol,
+            "Last Price": round(last["Close"], 2),
+            "RSI": round(last["RSI"], 2),
+            "MACD": round(last["MACD"], 2),
+            "Signal": signal
+        })
+
+    result = pd.DataFrame(all_data)
+    with placeholder.container():
+        st.dataframe(result, use_container_width=True)
+        st.info(f"Last updated at {time.strftime('%H:%M:%S')}. Auto-refreshing every {refresh_rate}s.")
+    time.sleep(refresh_rate)
