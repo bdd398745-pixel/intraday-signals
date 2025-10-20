@@ -1,131 +1,99 @@
+# intraday_signals_app.py
 import streamlit as st
-import yfinance as yf
 import pandas as pd
+import yfinance as yf
 import ta
+from datetime import datetime
+from streamlit_autorefresh import st_autorefresh
 
-# --------------------------------------------
+# ----------------------------
 # PAGE CONFIG
-# --------------------------------------------
+# ----------------------------
 st.set_page_config(page_title="Intraday Stock Signals", layout="wide")
-st.title("📊 Intraday Buy/Sell Signal Dashboard")
-st.markdown("This tool gives real-time BUY/SELL signals using technical indicators (RSI, MACD, Stochastic RSI).")
+st.title("Intraday Stock Buy/Sell Signals")
 
-# --------------------------------------------
+# ----------------------------
 # USER INPUTS
-# --------------------------------------------
-symbols_input = st.text_input("Enter stock symbols (comma-separated):", "RELIANCE.NS, TCS.NS, HDFCBANK.NS")
-interval = st.selectbox("Select Time Interval", ["1m", "5m", "15m", "30m", "1h", "1d"], index=2)
+# ----------------------------
+symbols_input = st.text_area(
+    "Enter stock symbols (comma separated)", 
+    value="RELIANCE.NS, TCS.NS, INFY.NS"
+)
+symbols = [s.strip().upper() for s in symbols_input.split(",") if s.strip()]
 
-symbols = [s.strip().upper() for s in symbols_input.split(",")]
+interval = st.selectbox("Select interval", ["1m", "5m", "15m", "30m", "1h", "1d"], index=1)
+refresh_time = st.number_input("Refresh every (seconds)", min_value=10, value=60)
 
-# --------------------------------------------
-# DATA FETCH FUNCTION
-# --------------------------------------------
+# ----------------------------
+# AUTO REFRESH
+# ----------------------------
+st_autorefresh(interval=refresh_time*1000, limit=None, key="refresh")
+
+# ----------------------------
+# FUNCTIONS
+# ----------------------------
 def get_data(symbol):
-    data = yf.download(symbol, period="5d", interval=interval, progress=False)
+    """Fetch historical intraday data safely"""
+    try:
+        df = yf.download(symbol, period="5d", interval=interval, progress=False)
+        if isinstance(df, tuple):  # some versions return (data, metadata)
+            df = df[0]
+        df = df.reset_index()
+        df.columns = [str(col).replace(" ", "_") for col in df.columns]
+        df["Close"] = df["Close"].astype(float).squeeze()
+        return df
+    except Exception as e:
+        st.warning(f"Could not fetch {symbol}: {e}")
+        return pd.DataFrame()
 
-    # Handle tuple output from yfinance
-    if isinstance(data, tuple):
-        data = data[0]
-
-    # Safety check
-    if data is None or data.empty:
-        raise ValueError(f"No data fetched for {symbol}")
-
-    data = data.reset_index()
-    data.columns = [str(col).replace(" ", "_") for col in data.columns]
-
-    # Ensure proper types
-    for col in ["Open", "High", "Low", "Close"]:
-        data[col] = pd.to_numeric(data[col], errors="coerce")
-
-    data.dropna(inplace=True)
-    return data
-
-# --------------------------------------------
-# INDICATOR CALCULATIONS
-# --------------------------------------------
 def compute_indicators(df):
-    df["RSI"] = ta.momentum.RSIIndicator(close=df["Close"], window=14).rsi()
-    macd = ta.trend.MACD(close=df["Close"])
-    df["MACD"] = macd.macd()
-    df["Signal_Line"] = macd.macd_signal()
-    stoch = ta.momentum.StochasticOscillator(high=df["High"], low=df["Low"], close=df["Close"])
-    df["Stochastic"] = stoch.stoch()
-    df["Stochastic_Signal"] = stoch.stoch_signal()
+    """Add RSI, MACD, and Stochastic RSI indicators"""
+    if df.empty or len(df) < 14:
+        return df
+    df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=14).rsi().fillna(0)
+    macd = ta.trend.MACD(df["Close"])
+    df["MACD"] = macd.macd().fillna(0)
+    df["MACD_Signal"] = macd.macd_signal().fillna(0)
+    df["StochRSI"] = ta.momentum.StochRSIIndicator(df["Close"]).stochrsi().fillna(0)
     return df
 
-# --------------------------------------------
-# SIGNAL LOGIC
-# --------------------------------------------
-def get_signal(row):
-    signals = {}
+def get_signal(last_row):
+    """Generate a simple Buy/Sell signal based on indicators"""
+    if last_row.empty:
+        return "No Data"
+    rsi = last_row["RSI"]
+    macd = last_row["MACD"]
+    macd_signal = last_row["MACD_Signal"]
+    stochrsi = last_row["StochRSI"]
 
-    # RSI
-    if row["RSI"] < 30:
-        signals["RSI"] = "BUY"
-    elif row["RSI"] > 70:
-        signals["RSI"] = "SELL"
+    if rsi < 30 and macd > macd_signal and stochrsi < 0.2:
+        return "BUY"
+    elif rsi > 70 and macd < macd_signal and stochrsi > 0.8:
+        return "SELL"
     else:
-        signals["RSI"] = "NEUTRAL"
+        return "HOLD"
 
-    # MACD
-    if row["MACD"] > row["Signal_Line"]:
-        signals["MACD"] = "BUY"
-    elif row["MACD"] < row["Signal_Line"]:
-        signals["MACD"] = "SELL"
-    else:
-        signals["MACD"] = "NEUTRAL"
+# ----------------------------
+# PROCESS & DISPLAY SIGNALS
+# ----------------------------
+all_signals = []
 
-    # Stochastic
-    if row["Stochastic"] < 20:
-        signals["Stochastic"] = "BUY"
-    elif row["Stochastic"] > 80:
-        signals["Stochastic"] = "SELL"
-    else:
-        signals["Stochastic"] = "NEUTRAL"
-
-    # Final Consensus
-    buy_count = list(signals.values()).count("BUY")
-    sell_count = list(signals.values()).count("SELL")
-
-    if buy_count > sell_count:
-        signals["Final_Signal"] = "🟢 STRONG BUY"
-    elif sell_count > buy_count:
-        signals["Final_Signal"] = "🔴 STRONG SELL"
-    else:
-        signals["Final_Signal"] = "⚪ HOLD"
-
-    return signals
-
-# --------------------------------------------
-# MAIN SIGNAL GENERATION
-# --------------------------------------------
-st.subheader("📈 Live Stock Signals")
-
-results = []
 for symbol in symbols:
-    try:
-        df = get_data(symbol)
-        df = compute_indicators(df)
-        last = df.iloc[-1]
-        signal = get_signal(last)
-        results.append({
-            "Symbol": symbol,
-            "RSI": round(last["RSI"], 2),
-            "MACD": round(last["MACD"], 2),
-            "Stochastic": round(last["Stochastic"], 2),
-            "Final Signal": signal["Final_Signal"]
-        })
-    except Exception as e:
-        st.error(f"⚠️ Error for {symbol}: {e}")
+    df = get_data(symbol)
+    if df.empty:
+        continue
+    df = compute_indicators(df)
+    last = df.iloc[-1]
+    signal = get_signal(last)
+    all_signals.append({
+        "Symbol": symbol,
+        "Datetime": last["Datetime"] if "Datetime" in last else last.name,
+        "Close": last["Close"],
+        "Signal": signal
+    })
 
-# --------------------------------------------
-# DISPLAY RESULTS
-# --------------------------------------------
-if results:
-    st.dataframe(pd.DataFrame(results), use_container_width=True)
+if all_signals:
+    signals_df = pd.DataFrame(all_signals)
+    st.dataframe(signals_df)
 else:
-    st.warning("No valid data found for the given symbols.")
-
-st.caption("⚡ Signals refresh when you rerun the app manually (Ctrl+R). Auto-refresh can be added later.")
+    st.info("No data to display. Check symbols or try again later.")
