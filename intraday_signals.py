@@ -3,7 +3,6 @@ import pandas as pd
 import streamlit as st
 from ta.momentum import RSIIndicator, StochasticOscillator, StochRSIIndicator, ROCIndicator, UltimateOscillator
 from ta.trend import MACD, ADXIndicator, CCIIndicator
-import plotly.graph_objects as go
 
 # --- Streamlit Page Config ---
 st.set_page_config(page_title="Intraday Signals", layout="wide")
@@ -13,8 +12,10 @@ st.title("Intraday Buy/Sell/Neutral Signals")
 stocks_input = st.text_input(
     "Enter stock tickers (comma separated, NSE format e.g., TCS.NS, INFY.NS):"
 )
-interval = st.selectbox("Select interval", ["5m", "15m", "30m", "1h"])
-period = st.selectbox("Select period", ["1d", "5d", "7d"])
+interval = st.selectbox("Select interval", ["1m", "5m", "15m", "30m", "1h"])
+period_options = {"1m": ["1d", "5d"], "5m": ["1d", "5d", "7d"], "15m": ["1d", "5d", "7d"],
+                  "30m": ["1d", "5d", "7d"], "1h": ["1d", "5d", "7d"]}
+period = st.selectbox("Select period", period_options[interval])
 
 # --- Caching data fetching ---
 @st.cache_data
@@ -119,17 +120,6 @@ if stocks_input:
         last['Combined Signal'] = "BUY" if total_score>0 else "SELL" if total_score<0 else "NEUTRAL"
 
         signals.append(last)
-
-        # --- Optional Plotly Chart ---
-        st.subheader(f"{ticker} Price Chart + RSI + MACD")
-        df_plot = df.copy()
-        df_plot['RSI'] = rsi
-        df_plot['MACD'] = MACD(df['Close']).macd()
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['Close'], name='Close'))
-        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['RSI'], name='RSI'))
-        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['MACD'], name='MACD'))
-        st.plotly_chart(fig, use_container_width=True)
 
     # --- Display Table ---
     df_signals = pd.DataFrame(signals)
