@@ -3,6 +3,8 @@ import pandas as pd
 import streamlit as st
 from ta.momentum import RSIIndicator, StochasticOscillator, StochRSIIndicator, ROCIndicator, UltimateOscillator
 from ta.trend import MACD, ADXIndicator, CCIIndicator
+from ta.volatility import AverageTrueRange
+from streamlit_autorefresh import st_autorefresh
 
 # --- Streamlit Page Config ---
 st.set_page_config(page_title="📈 Intraday Signals", layout="wide")
@@ -17,8 +19,6 @@ period_options = {"1m": ["1d", "5d"], "5m": ["1d", "5d", "7d"], "15m": ["1d", "5
                   "30m": ["1d", "5d", "7d"], "1h": ["1d", "5d", "7d"]}
 period = st.selectbox("Select period", period_options[interval])
 
-from streamlit_autorefresh import st_autorefresh
-
 # --- Auto Refresh (Every 1 mins) ---
 refresh = st.checkbox("🔄 Auto-refresh every 1 minutes", value=False)
 if refresh:
@@ -31,7 +31,7 @@ if refresh:
 def fetch_data(ticker, interval, period):
     df = yf.download(ticker, interval=interval, period=period, progress=False)
 
-    # --- Fix yfinance 2D or MultiIndex issues ---
+    # Fix MultiIndex issue (sometimes happens in yfinance)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [col[0] for col in df.columns]
 
@@ -79,6 +79,7 @@ if stocks_input:
         cci_val = CCIIndicator(high, low, close, window=14).cci()
         ult_osc = UltimateOscillator(high, low, close, window1=7, window2=14, window3=28).ultimate_oscillator()
         roc_val = ROCIndicator(close, window=12).roc()
+        atr_val = AverageTrueRange(high, low, close, window=14).average_true_range()
 
         df['EMA13'] = close.ewm(span=13, adjust=False).mean()
         df['Bull/Bear'] = high - df['EMA13']
@@ -100,7 +101,8 @@ if stocks_input:
             'CCI': round(cci_val.iloc[-1], 2),
             'Ultimate Osc': round(ult_osc.iloc[-1], 2),
             'ROC': round(roc_val.iloc[-1], 2),
-            'Bull/Bear': round(df['Bull/Bear'].iloc[-1], 2)
+            'Bull/Bear': round(df['Bull/Bear'].iloc[-1], 2),
+            'ATR': round(atr_val.iloc[-1], 2)
         }
 
         # --- Signal Logic ---
@@ -135,6 +137,25 @@ if stocks_input:
         total_score = sum(score_map[v] for v in signals.values() if v in score_map)
         signals['Combined Signal'] = "BUY" if total_score > 0 else "SELL" if total_score < 0 else "NEUTRAL"
 
+        # --- Suggested Buy/Sell/Stoploss ---
+        ltp = last['LTP']
+        atr = last['ATR']
+
+        if signals['Combined Signal'] == "BUY":
+            buy_price = round(ltp * 1.002, 2)  # entry 0.2% above LTP
+            stop_loss = round(ltp - atr, 2)    # stoploss 1×ATR below
+            sell_price = None
+        elif signals['Combined Signal'] == "SELL":
+            sell_price = round(ltp * 0.998, 2)  # entry 0.2% below LTP
+            stop_loss = round(ltp + atr, 2)     # stoploss 1×ATR above
+            buy_price = None
+        else:
+            buy_price = sell_price = stop_loss = None
+
+        signals['Buy Price'] = buy_price
+        signals['Sell Price'] = sell_price
+        signals['Stop Loss'] = stop_loss
+
         value_rows.append(last)
         signal_rows.append(signals)
 
@@ -154,5 +175,11 @@ if stocks_input:
                     'Williams %R Signal', 'CCI Signal', 'Ultimate Osc Signal', 'ROC Signal',
                     'Bull/Bear Signal', 'Combined Signal']
         ),
+        use_container_width=True
+    )
+
+    st.subheader("💰 Suggested Price Levels")
+    st.dataframe(
+        df_signals[['Stock', 'Combined Signal', 'Buy Price', 'Sell Price', 'Stop Loss']],
         use_container_width=True
     )
