@@ -121,12 +121,22 @@ if stocks_input:
 
         signals.append(last)
 
-    # --- Display Table ---
+    # --- Display Tables Separately ---
+if signals:
+    # Convert to DataFrame
     df_signals = pd.DataFrame(signals)
+    
+    # --- Indicator Values Table ---
+    indicator_cols = ['Stock', 'RSI', 'Stoch', 'Stoch RSI', 'MACD', 'ADX', 
+                      'Williams %R', 'CCI', 'Ultimate Osc', 'ROC', 'Bull/Bear']
+    st.subheader("Indicator Values Table")
+    st.dataframe(df_signals[indicator_cols].style.format("{:.2f}"))
+
+    # --- Signal Table ---
+    signal_cols = ['Stock', 'RSI Signal','Stoch Signal','Stoch RSI Signal','MACD Signal','ADX Signal',
+                   'Williams %R Signal','CCI Signal','Ultimate Osc Signal','ROC Signal',
+                   'Bull/Bear Signal','Combined Signal']
     st.subheader("Indicator Signals Table")
-    st.dataframe(df_signals.style.applymap(
-        highlight_signal, 
-        subset=['RSI Signal','Stoch Signal','Stoch RSI Signal','MACD Signal','ADX Signal',
-                'Williams %R Signal','CCI Signal','Ultimate Osc Signal','ROC Signal',
-                'Bull/Bear Signal','Combined Signal']
+    st.dataframe(df_signals[signal_cols].style.applymap(
+        highlight_signal, subset=signal_cols[1:]
     ))
