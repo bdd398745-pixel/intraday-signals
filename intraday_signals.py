@@ -9,12 +9,13 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="Intraday Trading Assistant", layout="wide")
 st.title("📈 Intraday Trading Assistant – Buy/Sell/Neutral Screener")
 
+from streamlit_autorefresh import st_autorefresh
+
 # --- Auto Refresh (Every 5 mins) ---
-st_autorefresh = st.checkbox("🔄 Auto-refresh every 5 minutes", value=True)
-if st_autorefresh:
-    st.experimental_rerun = st.experimental_rerun  # ensures rerun defined
-    st_autorefresh_interval = st.experimental_rerun  # for safety
-    st_autorefresh = st_autorefresh
+auto_refresh = st.checkbox("🔄 Auto-refresh every 5 minutes", value=True)
+if auto_refresh:
+    st_autorefresh(interval=5 * 60 * 1000, limit=None, key="auto_refresh")
+
 
 st.caption("Updated every 5 minutes when enabled")
 
