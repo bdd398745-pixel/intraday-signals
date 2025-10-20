@@ -19,28 +19,18 @@ if stocks_input:
     signals = []
 
     for ticker in tickers:
-        try:
-            df = yf.download(ticker, interval=interval, period=period)
-        except Exception as e:
-            st.warning(f"Error fetching data for {ticker}: {e}")
-            continue
-
+        df = yf.download(ticker, interval=interval, period=period)
         if df.empty:
             st.warning(f"No data for {ticker}")
             continue
 
-        # --- Ensure Close, High, Low are Series ---
+        # --- Ensure columns are 1D Series ---
         for col in ['Close', 'High', 'Low']:
-            if col not in df.columns:
-                st.warning(f"{col} missing for {ticker}")
-                continue
             if isinstance(df[col], pd.DataFrame):
                 df[col] = df[col].iloc[:, 0]
+            df[col] = df[col].astype(float)  # Ensure numeric
+            df[col] = df[col].reset_index(drop=True)  # Make 1D
 
-        # Handle single-row data
-        if len(df) == 1:
-            df = df.reset_index()
-        
         df = df[['Close', 'High', 'Low']]
 
         # --- Indicators ---
@@ -112,8 +102,8 @@ if stocks_input:
         last['Combined Signal'] = "BUY" if total_score>0 else "SELL" if total_score<0 else "NEUTRAL"
 
         # --- Suggested Buy/Sell Points ---
-        last['Suggested Buy'] = last['Close'] * 0.995  # 0.5% below last close
-        last['Suggested Sell'] = last['Close'] * 1.005  # 0.5% above last close
+        last['Suggested Buy'] = last['Close'] * 0.995
+        last['Suggested Sell'] = last['Close'] * 1.005
 
         signals.append(last)
 
