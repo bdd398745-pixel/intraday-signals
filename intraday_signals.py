@@ -24,12 +24,12 @@ if stocks_input:
             st.warning(f"No data for {ticker}")
             continue
 
-        # --- Ensure columns are 1D Series ---
+        # --- Ensure 1D Series ---
         for col in ['Close', 'High', 'Low']:
-            if isinstance(df[col], pd.DataFrame):
-                df[col] = df[col].iloc[:, 0]
-            df[col] = df[col].astype(float)  # Ensure numeric
-            df[col] = df[col].reset_index(drop=True)  # Make 1D
+            series = df[col]
+            if isinstance(series, pd.DataFrame):
+                series = series.iloc[:, 0]
+            df[col] = pd.Series(series.values, index=series.index, dtype=float)
 
         df = df[['Close', 'High', 'Low']]
 
@@ -102,8 +102,8 @@ if stocks_input:
         last['Combined Signal'] = "BUY" if total_score>0 else "SELL" if total_score<0 else "NEUTRAL"
 
         # --- Suggested Buy/Sell Points ---
-        last['Suggested Buy'] = last['Close'] * 0.995
-        last['Suggested Sell'] = last['Close'] * 1.005
+        last['Suggested Buy'] = round(last['Close']*0.995,2)
+        last['Suggested Sell'] = round(last['Close']*1.005,2)
 
         signals.append(last)
 
