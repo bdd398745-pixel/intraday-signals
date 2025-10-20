@@ -19,10 +19,10 @@ period = st.selectbox("Select period", period_options[interval])
 
 from streamlit_autorefresh import st_autorefresh
 
-# --- Auto Refresh (Every 5 mins) ---
-refresh = st.checkbox("🔄 Auto-refresh every 5 minutes", value=False)
+# --- Auto Refresh (Every 1 mins) ---
+refresh = st.checkbox("🔄 Auto-refresh every 1 minutes", value=False)
 if refresh:
-    count = st_autorefresh(interval=5 * 60 * 1000, limit=None, key="datarefresh")
+    count = st_autorefresh(interval=1 * 60 * 1000, limit=None, key="datarefresh")
     st.info(f"⏳ Auto-refresh active — last refreshed {count} times.")
 
 
