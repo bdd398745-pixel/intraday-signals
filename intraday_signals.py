@@ -24,14 +24,15 @@ if stocks_input:
             st.warning(f"No data for {ticker}")
             continue
 
-        # --- Ensure 1D Series ---
+        # --- Force 1D numeric Series ---
         for col in ['Close', 'High', 'Low']:
-            series = df[col]
-            if isinstance(series, pd.DataFrame):
-                series = series.iloc[:, 0]
-            df[col] = pd.Series(series.values, index=series.index, dtype=float)
+            if isinstance(df[col], pd.DataFrame) or df[col].ndim > 1:
+                df[col] = pd.to_numeric(df[col].squeeze(), errors='coerce')
 
-        df = df[['Close', 'High', 'Low']]
+        df = df[['Close', 'High', 'Low']].dropna()
+        if df.empty:
+            st.warning(f"No valid numeric data for {ticker}")
+            continue
 
         # --- Indicators ---
         rsi = RSIIndicator(df['Close'], window=14).rsi()
@@ -95,18 +96,3 @@ if stocks_input:
         scores = []
         for col in [
             'RSI Signal','Stoch Signal','Stoch RSI Signal','MACD Signal','ADX Signal',
-            'Williams %R Signal','CCI Signal','Ultimate Osc Signal','ROC Signal','Bull/Bear Signal'
-        ]:
-            scores.append(1 if last[col]=="BUY" else -1 if last[col]=="SELL" else 0)
-        total_score = sum(scores)
-        last['Combined Signal'] = "BUY" if total_score>0 else "SELL" if total_score<0 else "NEUTRAL"
-
-        # --- Suggested Buy/Sell Points ---
-        last['Suggested Buy'] = round(last['Close']*0.995,2)
-        last['Suggested Sell'] = round(last['Close']*1.005,2)
-
-        signals.append(last)
-
-    # --- Display Table ---
-    df_signals = pd.DataFrame(signals)
-    st.dataframe(df_signals)
