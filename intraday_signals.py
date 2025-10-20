@@ -24,17 +24,20 @@ symbols = [s.strip().upper() for s in symbols_input.split(",")]
 def get_data(symbol):
     data = yf.download(symbol, period="5d", interval=interval, progress=False)
 
-    # Handle cases where tuple is returned (data, metadata)
+    # Handle tuple output from yfinance
     if isinstance(data, tuple):
         data = data[0]
 
-    data = data.reset_index()
+    # Safety check
+    if data is None or data.empty:
+        raise ValueError(f"No data fetched for {symbol}")
 
-    # Clean column names
+    data = data.reset_index()
     data.columns = [str(col).replace(" ", "_") for col in data.columns]
 
-    # Ensure numeric
-    data["Close"] = pd.to_numeric(data["Close"], errors="coerce")
+    # Ensure proper types
+    for col in ["Open", "High", "Low", "Close"]:
+        data[col] = pd.to_numeric(data[col], errors="coerce")
 
     data.dropna(inplace=True)
     return data
@@ -115,7 +118,7 @@ for symbol in symbols:
             "Final Signal": signal["Final_Signal"]
         })
     except Exception as e:
-        st.error(f"Error for {symbol}: {e}")
+        st.error(f"⚠️ Error for {symbol}: {e}")
 
 # --------------------------------------------
 # DISPLAY RESULTS
