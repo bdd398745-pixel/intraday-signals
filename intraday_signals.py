@@ -130,7 +130,12 @@ if signals:
     indicator_cols = ['Stock', 'RSI', 'Stoch', 'Stoch RSI', 'MACD', 'ADX', 
                       'Williams %R', 'CCI', 'Ultimate Osc', 'ROC', 'Bull/Bear']
     st.subheader("Indicator Values Table")
-    st.dataframe(df_signals[indicator_cols].style.format("{:.2f}"))
+    # Convert all indicator columns to numeric, coerce errors to NaN
+for col in indicator_cols[1:]:
+    df_signals[col] = pd.to_numeric(df_signals[col], errors='coerce')
+
+st.dataframe(df_signals[indicator_cols].style.format("{:.2f}"))
+
 
     # --- Signal Table ---
     signal_cols = ['Stock', 'RSI Signal','Stoch Signal','Stoch RSI Signal','MACD Signal','ADX Signal',
