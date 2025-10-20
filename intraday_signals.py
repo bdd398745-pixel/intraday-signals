@@ -1,112 +1,89 @@
-import yfinance as yf
-import pandas as pd
 import streamlit as st
-from ta.momentum import RSIIndicator, StochasticOscillator, StochRSIIndicator, ROCIndicator, UltimateOscillator
-from ta.trend import MACD, ADXIndicator, CCIIndicator
+import pandas as pd
+import yfinance as yf
+from ta.momentum import RSIIndicator, StochasticOscillator, StochRSIIndicator, ROCIndicator
+from ta.trend import MACD, CCIIndicator, ADXIndicator
+from ta.volume import VolumeWeightedAveragePrice
+import time
 
-st.set_page_config(page_title="Intraday Signals", layout="wide")
-st.title("Intraday Buy/Sell/Neutral Signals")
+# --------------------------------------------
+# STREAMLIT PAGE SETUP
+# --------------------------------------------
+st.set_page_config(page_title="Intraday Indicator Signals", layout="wide")
+st.title("📊 Intraday Technical Signal Dashboard (Free Live Refresh)")
+st.caption("Data updates every few minutes from Yahoo Finance (5–10 min delay).")
 
-# --- Input ---
-stocks_input = st.text_input(
-    "Enter stock tickers (comma separated, NSE format e.g., TCS.NS, INFY.NS):"
-)
-interval = st.selectbox("Select interval", ["5m", "15m", "30m", "1h"])
-period = st.selectbox("Select period", ["1d", "5d", "7d"])
+# --------------------------------------------
+# SELECT STOCK
+# --------------------------------------------
+ticker = st.text_input("Enter NSE Stock Symbol", "RELIANCE.NS")
+refresh_rate = st.slider("Auto-refresh (minutes)", 1, 10, 3)
 
-if stocks_input:
-    tickers = [s.strip() for s in stocks_input.split(",")]
-    signals = []
+# --------------------------------------------
+# AUTO REFRESH
+# --------------------------------------------
+st_autorefresh = st.experimental_rerun
+st_autorefresh_counter = st.experimental_memo.clear
+placeholder = st.empty()
 
-    for ticker in tickers:
-        df = yf.download(ticker, interval=interval, period=period)
-        if df.empty:
-            st.warning(f"No data for {ticker}")
-            continue
+# --------------------------------------------
+# DATA FETCHING FUNCTION
+# --------------------------------------------
+@st.cache_data(ttl=60 * refresh_rate)
+def load_data(ticker):
+    df = yf.download(ticker, period="1d", interval="5m")
+    return df.dropna()
 
-        # --- Ensure columns are 1D Series ---
-        close = df['Close']
-        high = df['High']
-        low = df['Low']
+# --------------------------------------------
+# LOOP (simulate live feed)
+# --------------------------------------------
+df = load_data(ticker)
+if df.empty:
+    st.warning("No data fetched. Try another symbol like TCS.NS or INFY.NS.")
+else:
+    # --- Indicators ---
+    df["RSI"] = RSIIndicator(df["Close"], window=14).rsi()
+    df["%K"] = StochasticOscillator(df["High"], df["Low"], df["Close"], window=9, smooth_window=6).stoch()
+    df["StochRSI"] = StochRSIIndicator(df["Close"], window=14).stochrsi()
+    macd = MACD(df["Close"], window_slow=26, window_fast=12, window_sign=9)
+    df["MACD"], df["Signal"] = macd.macd(), macd.macd_signal()
+    adx = ADXIndicator(df["High"], df["Low"], df["Close"], window=14)
+    df["ADX"], df["DI+"] , df["DI-"] = adx.adx(), adx.adx_pos(), adx.adx_neg()
+    df["WilliamsR"] = (df["High"].rolling(14).max() - df["Close"]) / (df["High"].rolling(14).max() - df["Low"].rolling(14).min()) * -100
+    df["CCI"] = CCIIndicator(df["High"], df["Low"], df["Close"], window=14).cci()
+    df["ROC"] = ROCIndicator(df["Close"], window=12).roc()
+    df["EMA13"] = df["Close"].ewm(span=13, adjust=False).mean()
+    df["BullBear"] = df["High"] - df["EMA13"]
 
-        if isinstance(close, pd.DataFrame):
-            close = close.iloc[:, 0]
-        if isinstance(high, pd.DataFrame):
-            high = high.iloc[:, 0]
-        if isinstance(low, pd.DataFrame):
-            low = low.iloc[:, 0]
+    last = df.iloc[-1]
 
-        df = pd.DataFrame({'Close': close, 'High': high, 'Low': low})
+    # --- SIGNAL CONDITIONS ---
+    def sig(val, low, high, buy_below=True):
+        if buy_below and val < low: return "BUY"
+        if not buy_below and val > high: return "BUY"
+        if val > high: return "SELL"
+        if val < low: return "BUY"
+        return "NEUTRAL"
 
-        # --- Indicators ---
-        rsi = RSIIndicator(df['Close'], window=14).rsi()
-        stoch = StochasticOscillator(df['High'], df['Low'], df['Close'], window=14, smooth_window=3).stoch()
-        stoch_rsi = StochRSIIndicator(df['Close'], window=14, smooth1=3, smooth2=3).stochrsi()
-        macd_val = MACD(df['Close'], window_slow=26, window_fast=12, window_sign=9).macd_diff()
-        adx_val = ADXIndicator(df['High'], df['Low'], df['Close'], window=14).adx()
-        cci_val = CCIIndicator(df['High'], df['Low'], df['Close'], window=14).cci()
-        ult_osc = UltimateOscillator(df['High'], df['Low'], df['Close'], window1=7, window2=14, window3=28).ultimate_oscillator()
-        roc_val = ROCIndicator(df['Close'], window=12).roc()
+    signals = {
+        "RSI (14)": "BUY" if last.RSI < 30 else "SELL" if last.RSI > 70 else "NEUTRAL",
+        "Stochastic (9,6)": "BUY" if last["%K"] < 20 else "SELL" if last["%K"] > 80 else "NEUTRAL",
+        "Stoch RSI (14)": "BUY" if last.StochRSI < 0.2 else "SELL" if last.StochRSI > 0.8 else "NEUTRAL",
+        "MACD (12,26)": "BUY" if last.MACD > last.Signal else "SELL" if last.MACD < last.Signal else "NEUTRAL",
+        "ADX (14)": "BUY" if last.ADX > 25 and last["DI+"] > last["DI-"] else "SELL" if last.ADX > 25 else "NEUTRAL",
+        "Williams %R": "BUY" if last.WilliamsR < -80 else "SELL" if last.WilliamsR > -20 else "NEUTRAL",
+        "CCI (14)": "BUY" if last.CCI < -100 else "SELL" if last.CCI > 100 else "NEUTRAL",
+        "ROC (12)": "BUY" if last.ROC > 0 else "SELL" if last.ROC < 0 else "NEUTRAL",
+        "Bull/Bear Power (13)": "BUY" if last.BullBear > 0 else "SELL" if last.BullBear < 0 else "NEUTRAL",
+    }
 
-        # --- Bull/Bear Power manually ---
-        df['EMA13'] = df['Close'].ewm(span=13, adjust=False).mean()
-        df['Bull/Bear'] = df['High'] - df['EMA13']
+    # --- DISPLAY ---
+    st.subheader(f"📈 {ticker} — Latest Intraday Signals")
+    signal_df = pd.DataFrame(list(signals.items()), columns=["Indicator", "Signal"])
+    st.dataframe(signal_df, hide_index=True, use_container_width=True)
 
-        # --- Williams %R ---
-        will_r = (df['Close'] - df['High'].rolling(14).max()) / (
-            df['High'].rolling(14).max() - df['Low'].rolling(14).min()
-        ) * -100
+    # --- PLOT ---
+    st.line_chart(df["Close"], height=250)
 
-        # --- Last values ---
-        last = {
-            'Stock': ticker,
-            'RSI': rsi.iloc[-1],
-            'Stoch': stoch.iloc[-1],
-            'Stoch RSI': stoch_rsi.iloc[-1],
-            'MACD': macd_val.iloc[-1],
-            'ADX': adx_val.iloc[-1],
-            'Williams %R': will_r.iloc[-1],
-            'CCI': cci_val.iloc[-1],
-            'Ultimate Osc': ult_osc.iloc[-1],
-            'ROC': roc_val.iloc[-1],
-            'Bull/Bear': df['Bull/Bear'].iloc[-1]
-        }
+    st.success(f"✅ Last updated: {df.index[-1].strftime('%H:%M:%S')} — auto-refresh every {refresh_rate} min")
 
-        # --- Signal functions ---
-        def signal_rsi(x): return "BUY" if x < 30 else "SELL" if x > 70 else "NEUTRAL"
-        def signal_stoch(x): return "BUY" if x < 20 else "SELL" if x > 80 else "NEUTRAL"
-        def signal_stochrsi(x): return "BUY" if x < 0.2 else "SELL" if x > 0.8 else "NEUTRAL"
-        def signal_macd(x): return "BUY" if x > 0 else "SELL" if x < 0 else "NEUTRAL"
-        def signal_adx(x): return "BUY" if x > 25 else "NEUTRAL"
-        def signal_willr(x): return "BUY" if x < -80 else "SELL" if x > -20 else "NEUTRAL"
-        def signal_cci(x): return "BUY" if x < -100 else "SELL" if x > 100 else "NEUTRAL"
-        def signal_ultosc(x): return "BUY" if x < 30 else "SELL" if x > 70 else "NEUTRAL"
-        def signal_roc(x): return "BUY" if x > 0 else "SELL" if x < 0 else "NEUTRAL"
-        def signal_bb(x): return "BUY" if x > 0 else "SELL" if x < 0 else "NEUTRAL"
-
-        last['RSI Signal'] = signal_rsi(last['RSI'])
-        last['Stoch Signal'] = signal_stoch(last['Stoch'])
-        last['Stoch RSI Signal'] = signal_stochrsi(last['Stoch RSI'])
-        last['MACD Signal'] = signal_macd(last['MACD'])
-        last['ADX Signal'] = signal_adx(last['ADX'])
-        last['Williams %R Signal'] = signal_willr(last['Williams %R'])
-        last['CCI Signal'] = signal_cci(last['CCI'])
-        last['Ultimate Osc Signal'] = signal_ultosc(last['Ultimate Osc'])
-        last['ROC Signal'] = signal_roc(last['ROC'])
-        last['Bull/Bear Signal'] = signal_bb(last['Bull/Bear'])
-
-        # --- Combined Signal ---
-        scores = []
-        for col in [
-            'RSI Signal','Stoch Signal','Stoch RSI Signal','MACD Signal','ADX Signal',
-            'Williams %R Signal','CCI Signal','Ultimate Osc Signal','ROC Signal','Bull/Bear Signal'
-        ]:
-            scores.append(1 if last[col]=="BUY" else -1 if last[col]=="SELL" else 0)
-        total_score = sum(scores)
-        last['Combined Signal'] = "BUY" if total_score>0 else "SELL" if total_score<0 else "NEUTRAL"
-
-        signals.append(last)
-
-    # --- Display Table ---
-    df_signals = pd.DataFrame(signals)
-    st.dataframe(df_signals)
