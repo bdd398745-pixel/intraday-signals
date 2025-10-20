@@ -1,6 +1,5 @@
-yfinance
-pandas
-numpy
-ta
-streamlit
-
+streamlit==1.50.0
+yfinance==0.2.66
+ta==0.11.0
+pandas==2.3.3
+streamlit-autorefresh==0.1.2
